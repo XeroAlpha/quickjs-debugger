@@ -1,0 +1,32 @@
+{
+  "name": "quickjs-debugger",
+  "version": "1.0.0",
+  "description": "A debug library for quickjs",
+  "main": "lib/index.js",
+  "bin": {
+    "qjs-debugger": "./src/repl.js"
+  },
+  "files": [
+    "lib",
+    "src"
+  ],
+  "scripts": {
+    "lint": "eslint . --ext .js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XeroAlpha/quickjs-debugger.git"
+  },
+  "keywords": [
+    "quickjs",
+    "debugger",
+    "gametest"
+  ],
+  "author": "ProjectXero",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.21.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.26.0"
+  }
+}
