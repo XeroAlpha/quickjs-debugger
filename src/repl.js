@@ -58,6 +58,10 @@ class QuickJSDebugServer extends EventEmitter {
             this.emit("log", ev);
         });
         this.session.on("end", () => {
+            this.protocol.close();
+        });
+        this.protocol.on("end", () => {
+            this.protocol = null;
             this.emit("offline", address);
             this.reset();
             this.emit("update");
@@ -442,10 +446,11 @@ class DebuggerReplServer extends repl.REPLServer {
                     this.printLine(`Inspect method has changed to ${this.inspectMethod}`);
                     return;
                 }
+                const lines = inspectMethods.map((e) => `${e[0]} - ${e[1]}`);
                 if (args) {
-                    this.printLine(`Invalid inspect method: ${args}`);
+                    lines.unshift(`Invalid inspect method: ${args}`);
                 }
-                this.printLine(inspectMethods.map((e) => `${e[0]} - ${e[1]}`).join("\n"));
+                this.printLine(lines.join("\n"));
             }
         });
         this.defineCommand("resume", {
