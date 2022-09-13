@@ -24,10 +24,19 @@ function main([port]) {
             null: null,
             undefined,
             object: { array: [1, 2, 3] }
-        })`.replace(/\n/g, ""));
+        })`);
         const result = await resultRef.inspect();
         assert.deepEqual(result, expected);
-        process.stdout.write(await topStack.evaluate(() => "ok\n"));
+        process.stdout.write("Local scope\n");
+        process.stdout.write(await topStack.evaluate(() => {
+            const error = new Error();
+            return error.stack;
+        }));
+        process.stdout.write("Global scope\n");
+        process.stdout.write(await topStack.evaluateGlobal(() => {
+            const error = new Error();
+            return error.stack;
+        }));
         session.resume();
         protocol.close();
         server.close();

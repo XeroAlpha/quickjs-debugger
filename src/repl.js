@@ -208,7 +208,7 @@ function inspectHandle(handle) {
     return `${handle.type} ${handle.name} <${refStr} *${handle.ref}> ${String(handle).replace(/\n/g, " ")}`;
 }
 
-const LOG_LEVEL = ["info", "warn", "error", "silent"];
+const LOG_LEVEL = ["debug", "info", "warn", "error", "silent"];
 
 const integerRegex = /\d+/;
 const breakpointRegex = /(?:(.+)\s+)?([+-])?(\d+)/;
@@ -451,6 +451,22 @@ class DebuggerReplServer extends repl.REPLServer {
                     lines.unshift(`Invalid inspect method: ${args}`);
                 }
                 this.printLine(lines.join("\n"));
+            }
+        });
+        this.defineCommand("loglevel", {
+            help: "Show or change log level",
+            action: async (args) => {
+                const argsTrimmed = args.trim().toLowerCase();
+                const index = LOG_LEVEL.indexOf(argsTrimmed);
+                if (index >= 0) {
+                    this.server.logLevel = index;
+                    this.printLine(`Log level has changed to ${LOG_LEVEL[index]}`);
+                } else {
+                    this.printLine([
+                        `Log level is ${LOG_LEVEL[this.server.logLevel]}`,
+                        `Accept values: ${LOG_LEVEL.join(", ")}`
+                    ].join("\n"));
+                }
             }
         });
         this.defineCommand("resume", {

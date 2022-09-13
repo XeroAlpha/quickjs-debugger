@@ -35,7 +35,7 @@ interface PropertyListOptions {
     count: number;
 }
 
-namespace QuickJSDebugSessionEvent {
+declare namespace QuickJSDebugSessionEvent {
     enum StoppedReason {
         Entry = "entry",
         Exception = "exception",
@@ -93,40 +93,30 @@ declare class QuickJSDebugSession extends TypedEventEmitter<QuickJSDebugSessionE
     stepNext(): Promise<void>;
     stepIn(): Promise<void>;
     stepOut(): Promise<void>;
-    evaluate(frameId: number, expression: string): Promise<QuickJSVariable>;
+    evaluate(frameId: number, expression: string): Promise<QuickJSVariable<any>>;
     traceStack(): Promise<QuickJSStackFrame[]>;
     getTopStack(): Promise<QuickJSStackFrame>;
     getScopes(frameId: number): Promise<QuickJSScope[]>;
-    inspectVariable(reference: number, options?: PropertyListOptions): Promise<QuickJSVariable[]>;
+    inspectVariable(reference: number, options?: PropertyListOptions): Promise<QuickJSVariable<any>[]>;
     resume(): void;
     setBreakpoints(fileName: string, lineNumbers?: number[]): void;
     setStopOnException(enabled: boolean): void;
 }
 
-class QuickJSStackFrame {
+declare class QuickJSStackFrame {
     id: number;
     name: string;
     fileName?: string;
     lineNumber?: number;
 
-    evaluateExpression(expression: string): Promise<QuickJSVariable>;
+    evaluateExpression(expression: string): Promise<QuickJSVariable<any>>;
     getScopes(): Promise<QuickJSScope[]>;
     
-    /**
-     * Evaluate a function or string and return itself
-     * 
-     * Do not include block comment or any external variables in function
-     * Please use args JSON to pass parameters
-     */
-    evaluate(f: Function | string, args: any): any;
-
-    /**
-     * Evaluate a function or string and return its JSHandle
-     * 
-     * Do not include block comment or any external variables in function
-     * Please use args JSON to pass parameters
-     */
-    evaluateHandle(f: Function | string, args: any): Promise<QuickJSVariable>;
+    evaluate(expression: string): Promise<any>;
+    evaluate<T, R>(f: (args: T) => R, args: T): Promise<R>;
+    evaluateGlobal<T, R>(f: (args: T) => R, args: T): Promise<R>;
+    evaluateHandle<T, R>(f: (args: T) => R, args: T): Promise<QuickJSVariable<R>>;
+    evaluateHandleGlobal<T, R>(f: (args: T) => R, args: T): Promise<QuickJSVariable<R>>;
 }
 
 interface InspectOptions {
@@ -134,21 +124,21 @@ interface InspectOptions {
     inspectProto?: boolean;
 }
 
-class QuickJSHandle {
+declare class QuickJSHandle<T> {
     ref: number;
     primitive: boolean;
     isArray: boolean;
     indexedCount?: number;
-    getProperties(options?: PropertyListOptions): Promise<QuickJSVariable[]>;
-    inspect(maxDepth?: number): Promise<any>;
+    getProperties(options?: PropertyListOptions): Promise<QuickJSVariable<any>[]>;
+    inspect(maxDepth?: number): Promise<T>;
 }
 
-class QuickJSScope extends QuickJSHandle {
+declare class QuickJSScope extends QuickJSHandle<object> {
     name: string;
     expensive: boolean;
 }
 
-class QuickJSVariable extends QuickJSHandle {
+declare class QuickJSVariable<T> extends QuickJSHandle<T> {
     name: string;
     type: string;
     value?: unknown;
