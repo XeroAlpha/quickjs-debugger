@@ -1,6 +1,6 @@
 {
   "name": "quickjs-debugger",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A debug library for quickjs",
   "main": "lib/index.js",
   "bin": {
@@ -25,8 +25,8 @@
   "author": "ProjectXero",
   "license": "MIT",
   "devDependencies": {
-    "eslint": "^8.21.0",
+    "eslint": "^8.35.0",
     "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-plugin-import": "^2.26.0"
+    "eslint-plugin-import": "^2.27.5"
   }
 }

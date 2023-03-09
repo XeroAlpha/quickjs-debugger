@@ -198,6 +198,18 @@ class QuickJSDebugServer extends EventEmitter {
             this.emit("error", err);
         }
     }
+
+    async import(sync, module, alias) {
+        const moduleCode = JSON.stringify(module);
+        const aliasCode = JSON.stringify(alias || module);
+        const stacks = await this.session.traceStack();
+        const rootStack = stacks[stacks.length - 1];
+        if (sync) {
+            await rootStack.evaluate(`((m)=>globalThis[${aliasCode}]=m)(require(${moduleCode}))`);
+        } else if (!sync) {
+            await rootStack.evaluate(`import(${moduleCode}).then((m)=>globalThis[${aliasCode}]=m)`);
+        }
+    }
 }
 
 function inspectHandle(handle) {
@@ -210,9 +222,10 @@ function inspectHandle(handle) {
 
 const LOG_LEVEL = ["debug", "info", "warn", "error", "silent"];
 
-const integerRegex = /\d+/;
-const breakpointRegex = /(?:(.+)\s+)?([+-])?(\d+)/;
-const referenceLocatorRegex = /(\d+)(?:\s+(\d+)\.\.(\d+))?/;
+const integerRegex = /^\d+$/;
+const breakpointRegex = /^(?:(.+)\s+)?([+-])?(\d+)$/;
+const referenceLocatorRegex = /^(\d+)(?:\s+(\d+)\.\.(\d+))?$/;
+const importRegex = /^(.+?)(?:\s+as\s+(\w+))?$/;
 const inspectMethods = [
     ["js", "[Default] Inspect recursively but cost more time"],
     ["handle", "Only show references of properties"]
@@ -466,6 +479,38 @@ class DebuggerReplServer extends repl.REPLServer {
                         `Log level is ${LOG_LEVEL[this.server.logLevel]}`,
                         `Accept values: ${LOG_LEVEL.join(", ")}`
                     ].join("\n"));
+                }
+            }
+        });
+        this.defineCommand("require", {
+            help: "Require module to global scope",
+            action: async (args) => {
+                const match = importRegex.exec(args);
+                if (match) {
+                    if (this.server.paused) {
+                        await this.server.import(true, match[1], match[2]);
+                        this.printLine(`Trying to require ${match[1]}`);
+                    } else {
+                        this.printLine("Dynamic require is not allowed when running");
+                    }
+                } else {
+                    this.printLine(`Invalid import statement: ${args}`);
+                }
+            }
+        });
+        this.defineCommand("import", {
+            help: "Import module to global scope",
+            action: async (args) => {
+                const match = importRegex.exec(args);
+                if (match) {
+                    if (this.server.paused) {
+                        await this.server.import(false, match[1], match[2]);
+                        this.printLine(`Trying to import ${match[1]} (Continuation is required)`);
+                    } else {
+                        this.printLine("Dynamic import is not allowed when running");
+                    }
+                } else {
+                    this.printLine(`Invalid import statement: ${args}`);
                 }
             }
         });
