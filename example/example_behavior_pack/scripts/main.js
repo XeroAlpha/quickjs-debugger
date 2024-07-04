@@ -1,13 +1,13 @@
-import * as Minecraft from "mojang-minecraft";
-import * as GameTest from "mojang-gametest";
+import * as Minecraft from '@minecraft/server';
+import * as GameTest from '@minecraft/server-gametest';
 
-let totalTicks = 0;
-Minecraft.world.events.tick.subscribe(() => {
-    totalTicks += 1; // trigger debugger to response since quickjs does not provide a message loop
-    (() => {})(Minecraft, totalTicks);
+globalThis.totalTicks = 0;
+Minecraft.system.run(function handler() {
+    globalThis.totalTicks += 1; // trigger debugger to response since quickjs does not provide a message loop
+    Minecraft.system.run(handler);
 });
 
-GameTest.register("gametest", "remote", (test) => {
+GameTest.register('gametest', 'remote', (test) => {
     test.succeed();
-    /* BREAKPOINT HERE */ (() => {})(test, Minecraft, totalTicks);
+    /* BREAKPOINT HERE */ console.error(`Current tick: ${globalThis.totalTicks}`);
 });
