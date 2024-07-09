@@ -13,6 +13,24 @@ import {
     QuickJSStackFrame
 } from './index.js';
 import { Context } from 'vm';
+import { StatTree } from './lib/minecraft.js';
+
+function dumpStatTree(tree: StatTree) {
+    const ret: string[] = [];
+    for (const node of Object.values(tree)) {
+        if (!node) continue;
+        if (node.values) {
+            ret.push(`- ${node.name}: ${node.values.join(', ')}`);
+        } else {
+            ret.push(`- ${node.name}`);
+        }
+        if (node.children) {
+            const childDump = dumpStatTree(node.children).map((l) => `  ${l}`);
+            ret.push(...childDump);
+        }
+    }
+    return ret;
+}
 
 class MCQuickJSDebugServer extends EventEmitter {
     server: net.Server;
@@ -56,9 +74,10 @@ class MCQuickJSDebugServer extends EventEmitter {
         this.socket = socket;
         this.connection = new QuickJSDebugConnection(socket);
         this.session = new MinecraftDebugSession(this.connection);
-        this.paused = true;
+        this.paused = false;
         this.emit('online', address);
         this.syncBreakpoints();
+        this.session.resume();
         this.session.on('stopped', (ev) => {
             this.paused = true;
             this.emit('stopped', ev);
@@ -80,7 +99,6 @@ class MCQuickJSDebugServer extends EventEmitter {
             this.reset();
             this.emit('update');
         });
-        this.updateStateAsync();
     }
 
     get port() {
@@ -231,6 +249,14 @@ class MCQuickJSDebugServer extends EventEmitter {
         }
         throw new Error('Debuggee is offline');
     }
+
+    dumpStatMessage() {
+        const stat = this.session?.currentStat;
+        if (stat) {
+            return dumpStatTree(stat).join('\n');
+        }
+        return null;
+    }
 }
 
 function inspectHandle(handle: QuickJSHandle) {
@@ -246,7 +272,7 @@ const LOG_LEVEL = ['debug', 'info', 'warn', 'error', 'silent'];
 const integerRegex = /^\d+$/;
 const breakpointRegex = /^(?:(.+)\s+)?([+-])?(\d+)$/;
 const referenceLocatorRegex = /^(\d+)(?:\s+(\d+)\.\.(\d+))?$/;
-const importRegex = /^(.+?)(?:\s+as\s+(\w+))?$/;
+const importRegex = /^(\S+?)(?:\s+as\s+(\w+))?$/;
 const inspectMethods = [
     ['js', '[Default] Inspect recursively but cost more time'],
     ['handle', 'Only show references of properties']
@@ -590,6 +616,17 @@ class DebuggerReplServer {
                 }
                 this.repl.displayPrompt(true);
             })
+        });
+        this.repl.defineCommand('stat', {
+            help: '[Minecraft only] Show running statistics',
+            action: () => {
+                const stat = this.server.dumpStatMessage();
+                if (stat) {
+                    this.printLine(stat);
+                } else {
+                    this.printLine('Statistics is not available');
+                }
+            }
         });
     }
 

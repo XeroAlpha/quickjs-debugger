@@ -27,20 +27,10 @@ export interface ProtocolEvent extends DebuggeeEvent {
 
 export interface StatDataV1 {
     id: string;
-    parent_id: string;
-    type: string;
-    label: string;
-    value: string;
-}
-
-export interface StatData {
-    name: string;
-    id: string;
-    full_id: string;
-    parent_id: string;
-    parent_full_id: string;
-    values: number[];
-    tick: number;
+    parent_id?: string;
+    type?: string;
+    label?: string;
+    value?: string | number;
 }
 
 export interface StatDataModel {
@@ -54,14 +44,83 @@ export interface StatMessageV1Event extends DebuggeeEvent {
     stats: StatDataV1[];
 }
 
-export interface StatMessageEvent extends DebuggeeEvent {
+export interface StatMessageV2Event extends DebuggeeEvent {
     type: 'StatEvent2';
     tick: number;
     stats: StatDataModel[];
 }
 
+export interface StatTreeNode {
+    name: string;
+    label?: string;
+    type?: string;
+    updateTick?: number;
+    values?: (string | number)[];
+    children?: StatTree;
+}
+
+export type StatTree = Record<string, StatTreeNode | undefined>;
+
+export interface StatEvent {
+    stat: StatTree;
+    tick: number;
+}
+
+function mergeStatTreeNodeV1(target: StatTree, updated: StatDataV1[], pathCache: Map<string, string[]>) {
+    for (const statData of updated) {
+        const path: string[] = [];
+        if (statData.parent_id) {
+            const cachedPath = pathCache.get(statData.parent_id);
+            if (cachedPath) {
+                path.push(...cachedPath);
+            } else {
+                continue;
+            }
+        }
+        let currentTarget = target;
+        for (const part of path) {
+            const newTargetOwner = currentTarget[part];
+            if (!newTargetOwner) {
+                throw new Error(`Cannot find node in stat tree: ${path.join('->')}`);
+            }
+            currentTarget = newTargetOwner.children ?? (newTargetOwner.children = {});
+        }
+        if (!pathCache.has(statData.id)) {
+            pathCache.set(statData.id, [...path, statData.id]);
+        }
+        let existed = currentTarget[statData.id];
+        if (!existed) {
+            existed = currentTarget[statData.id] = { name: statData.id };
+        }
+        existed.label = statData.label;
+        existed.type = statData.type;
+        if (statData.value !== undefined) {
+            existed.values = [statData.value];
+        }
+    }
+}
+
+function mergeStatTreeNodeV2(target: StatTree, updated: StatDataModel[], tick: number) {
+    for (const statData of updated) {
+        let existed = target[statData.name];
+        if (!existed) {
+            existed = target[statData.name] = { name: statData.name };
+        }
+        existed.updateTick = tick;
+        if (statData.values !== undefined) {
+            existed.values = statData.values;
+        }
+        if (statData.children) {
+            const children = existed.children ?? (existed.children = {});
+            mergeStatTreeNodeV2(children, statData.children, tick);
+        }
+    }
+}
+
 export class MinecraftDebugSession extends QuickJSDebugSession {
     protocolInfo?: ProtocolInfo;
+    currentStat: StatTree | null = null;
+    currentTick = 0;
     constructor(connection: DebugConnection) {
         super(connection);
         connection.on('PrintEvent', (ev: LogEvent) => {
@@ -78,11 +137,17 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
                 });
             }
         });
+        const v1PathCache = new Map<string, string[]>();
         connection.on('StatEvent', (ev: StatMessageV1Event) => {
-            this.emit('statV1', ev);
+            const stat = this.currentStat ?? (this.currentStat = {});
+            mergeStatTreeNodeV1(stat, ev.stats, v1PathCache);
+            this.emit('stat', { stat, tick: this.currentTick });
         });
-        connection.on('StatEvent2', (ev: StatMessageEvent) => {
-            this.emit('stat', ev);
+        connection.on('StatEvent2', (ev: StatMessageV2Event) => {
+            const stat = this.currentStat ?? (this.currentStat = {});
+            this.currentTick = ev.tick;
+            mergeStatTreeNodeV2(stat, ev.stats, ev.tick);
+            this.emit('stat', { stat, tick: ev.tick });
         });
     }
 
@@ -94,8 +159,7 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
 export interface MinecraftDebugSessionEventMap {
     log: (event: LogEvent) => void;
     protocol: (event: ProtocolEvent) => void;
-    statV1: (event: StatMessageV1Event) => void;
-    stat: (event: StatMessageEvent) => void;
+    stat: (event: StatMessageV2Event) => void;
 }
 
 export interface MinecraftDebugSession {
@@ -104,41 +168,35 @@ export interface MinecraftDebugSession {
     on(eventName: 'end', listener: () => void): this;
     on(eventName: 'log', listener: (event: LogEvent) => void): this;
     on(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    on(eventName: 'statV1', listener: (event: StatMessageV1Event) => void): this;
-    on(eventName: 'stat', listener: (event: StatMessageEvent) => void): this;
+    on(eventName: 'stat', listener: (event: StatEvent) => void): this;
     once(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     once(eventName: 'context', listener: (event: ContextEvent) => void): this;
     once(eventName: 'end', listener: () => void): this;
     once(eventName: 'log', listener: (event: LogEvent) => void): this;
     once(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    once(eventName: 'statV1', listener: (event: StatMessageV1Event) => void): this;
-    once(eventName: 'stat', listener: (event: StatMessageEvent) => void): this;
+    once(eventName: 'stat', listener: (event: StatEvent) => void): this;
     off(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     off(eventName: 'context', listener: (event: ContextEvent) => void): this;
     off(eventName: 'end', listener: () => void): this;
     off(eventName: 'log', listener: (event: LogEvent) => void): this;
     off(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    off(eventName: 'statV1', listener: (event: StatMessageV1Event) => void): this;
-    off(eventName: 'stat', listener: (event: StatMessageEvent) => void): this;
+    off(eventName: 'stat', listener: (event: StatEvent) => void): this;
     addListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     addListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
     addListener(eventName: 'end', listener: () => void): this;
     addListener(eventName: 'log', listener: (event: LogEvent) => void): this;
     addListener(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    addListener(eventName: 'statV1', listener: (event: StatMessageV1Event) => void): this;
-    addListener(eventName: 'stat', listener: (event: StatMessageEvent) => void): this;
+    addListener(eventName: 'stat', listener: (event: StatEvent) => void): this;
     removeListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     removeListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
     removeListener(eventName: 'end', listener: () => void): this;
     removeListener(eventName: 'log', listener: (event: LogEvent) => void): this;
     removeListener(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    removeListener(eventName: 'statV1', listener: (event: StatMessageV1Event) => void): this;
-    removeListener(eventName: 'stat', listener: (event: StatMessageEvent) => void): this;
+    removeListener(eventName: 'stat', listener: (event: StatEvent) => void): this;
     emit(eventName: 'stopped', event: StoppedEvent): boolean;
     emit(eventName: 'context', event: ContextEvent): boolean;
     emit(eventName: 'end'): boolean;
     emit(eventName: 'log', event: LogEvent): boolean;
     emit(eventName: 'protocol', event: ProtocolEvent): boolean;
-    emit(eventName: 'statV1', event: StatMessageV1Event): boolean;
-    emit(eventName: 'stat', event: StatMessageEvent): boolean;
+    emit(eventName: 'stat', event: StatEvent): boolean;
 }
