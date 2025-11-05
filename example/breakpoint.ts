@@ -1,6 +1,6 @@
-import { strict as assert } from 'assert';
-import { AddressInfo, createServer } from 'net';
-import { QuickJSDebugConnection, MinecraftDebugSession } from '../src/index.js';
+import { strict as assert } from 'node:assert';
+import { type AddressInfo, createServer } from 'node:net';
+import { MinecraftDebugSession, QuickJSDebugConnection } from '../src/index.js';
 
 const Minecraft = {} as typeof import('@minecraft/server');
 
@@ -13,7 +13,7 @@ async function test(session: MinecraftDebugSession) {
             const permutation = Minecraft.BlockPermutation.resolve(blockId);
             return permutation.getTags();
         },
-        { blockId: 'cobblestone' }
+        { blockId: 'cobblestone' },
     );
     assert.deepEqual(result, ['stone']);
     process.stdout.write(
@@ -21,7 +21,7 @@ async function test(session: MinecraftDebugSession) {
             const player = [...Minecraft.world.getPlayers()][0];
             const { location } = player;
             return `${player.name}(${location.x},${location.y},${location.z})`;
-        })
+        }),
     );
     process.stdout.write('\n');
     await session.continue();

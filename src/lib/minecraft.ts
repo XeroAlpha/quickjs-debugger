@@ -1,5 +1,11 @@
-import { DebugConnection, DebuggeeEvent } from './connection.js';
-import { ContextEvent, QuickJSDebugSession, StoppedEvent } from './session.js';
+import type { DebugConnection, DebuggeeEvent } from './connection.js';
+import {
+    type BreakpointInfo,
+    type BreakpointStatus,
+    type ContextEvent,
+    QuickJSDebugSession,
+    type StoppedEvent,
+} from './session.js';
 
 export enum ProtocolVersion {
     Unknown = 0,
@@ -23,10 +29,15 @@ export enum ProtocolVersion {
      */
     SupportPasscode = 4,
     /**
-     * Debugger can take mc script profiler captures
+     * Debugger can take MC script profiler captures
      * @since Minecraft 1.21.50.25
      */
-    SupportProfilerCaptures = 5
+    SupportProfilerCaptures = 5,
+    /**
+     * Breakpoints as request, MC can reject
+     * @since Minecraft 1.21.130.24
+     */
+    SupportBreakpointsAsRequest = 6,
 }
 
 export interface ProtocolInfo {
@@ -40,7 +51,7 @@ export enum LogLevel {
     Info = 1,
     Warn = 2,
     Error = 3,
-    Fatal = 4
+    Fatal = 4,
 }
 
 export interface LogEvent extends DebuggeeEvent {
@@ -81,6 +92,7 @@ export interface StatDataV1 {
 
 export interface StatDataModel {
     name: string;
+    should_aggregate?: boolean;
     children?: StatDataModel[];
     values?: number[];
 }
@@ -101,6 +113,7 @@ export interface StatTreeNode {
     label?: string;
     type?: string;
     updateTick?: number;
+    aggregated?: boolean;
     values?: (string | number)[];
     children?: StatTree;
 }
@@ -129,7 +142,10 @@ function mergeStatTreeNodeV1(target: StatTree, updated: StatDataV1[], pathCache:
             if (!newTargetOwner) {
                 throw new Error(`Cannot find node in stat tree: ${path.join('->')}`);
             }
-            currentTarget = newTargetOwner.children ?? (newTargetOwner.children = {});
+            if (!newTargetOwner.children) {
+                newTargetOwner.children = {};
+            }
+            currentTarget = newTargetOwner.children;
         }
         if (!pathCache.has(statData.id)) {
             pathCache.set(statData.id, [...path, statData.id]);
@@ -144,6 +160,7 @@ function mergeStatTreeNodeV1(target: StatTree, updated: StatDataV1[], pathCache:
             existed.values = [statData.value];
         }
     }
+    return target;
 }
 
 function mergeStatTreeNodeV2(target: StatTree, updated: StatDataModel[], tick: number) {
@@ -156,17 +173,32 @@ function mergeStatTreeNodeV2(target: StatTree, updated: StatDataModel[], tick: n
         if (statData.values !== undefined) {
             existed.values = statData.values;
         }
+        if (statData.values !== undefined) {
+            existed.aggregated = statData.should_aggregate;
+        }
         if (statData.children) {
-            const children = existed.children ?? (existed.children = {});
+            let children = existed.children;
+            if (!children) {
+                children = existed.children = {};
+            }
+            if (statData.should_aggregate === true) {
+                const newKeys = new Set(statData.children.map((e) => e.name));
+                const removingKeys = Object.keys(children).filter((e) => !newKeys.has(e));
+                for (const key of removingKeys) {
+                    delete children[key];
+                }
+            }
             mergeStatTreeNodeV2(children, statData.children, tick);
         }
     }
+    return target;
 }
 
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: Event emitter
 export class MinecraftDebugSession extends QuickJSDebugSession {
     protocolVersion = ProtocolVersion.Unknown;
     protocolInfo?: ProtocolInfo;
-    currentStat: StatTree | null = null;
+    currentStat?: StatTree;
     currentTick = 0;
     constructor(connection: DebugConnection, protocolInfo?: ProtocolInfo) {
         super(connection);
@@ -184,20 +216,20 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
                 this.connection.sendEnvelope('protocol', {
                     version: protocolInfo.version,
                     target_module_uuid: protocolInfo.targetModuleUuid,
-                    passcode: protocolInfo.passcode
+                    passcode: protocolInfo.passcode,
                 });
             }
         });
         const v1PathCache = new Map<string, string[]>();
         connection.on('StatEvent', (ev: StatMessageV1Event) => {
-            const stat = this.currentStat ?? (this.currentStat = {});
-            mergeStatTreeNodeV1(stat, ev.stats, v1PathCache);
+            if (!this.currentStat) this.currentStat = {};
+            const stat = mergeStatTreeNodeV1(this.currentStat, ev.stats, v1PathCache);
             this.emit('stat', { stat, tick: this.currentTick });
         });
         connection.on('StatEvent2', (ev: StatMessageV2Event) => {
-            const stat = this.currentStat ?? (this.currentStat = {});
+            if (!this.currentStat) this.currentStat = {};
+            const stat = mergeStatTreeNodeV2(this.currentStat, ev.stats, ev.tick);
             this.currentTick = ev.tick;
-            mergeStatTreeNodeV2(stat, ev.stats, ev.tick);
             this.emit('stat', { stat, tick: ev.tick });
         });
         connection.on('ProfilerCapture', (ev: ProfilerCaptureEvent) => {
@@ -209,18 +241,29 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
         this.protocolInfo = protocolInfo;
     }
 
+    setBreakpoints(fileName: string, breakpoints: BreakpointInfo[]) {
+        if (this.protocolVersion >= ProtocolVersion.SupportBreakpointsAsRequest) {
+            const breakpointLines = breakpoints.map((e) => e.line);
+            return this.setBreakpointLines(fileName, breakpointLines);
+        } else {
+            super.setBreakpoints(fileName, breakpoints);
+            const status: BreakpointStatus[] = breakpoints.map(() => ({ verified: true }));
+            return status;
+        }
+    }
+
     sendMinecraftCommand(command: string, dimensionType?: string) {
         if (this.protocolVersion >= ProtocolVersion.SupportProfilerCaptures) {
             this.connection.sendEnvelope('minecraftCommand', {
                 command: {
                     command,
-                    dimension_type: dimensionType ?? 'overworld'
-                }
+                    dimension_type: dimensionType ?? 'overworld',
+                },
             });
         } else if (this.protocolVersion >= ProtocolVersion.SupportPasscode) {
             this.connection.sendEnvelope('minecraftCommand', {
                 command,
-                dimension_type: dimensionType ?? 'overworld'
+                dimension_type: dimensionType ?? 'overworld',
             });
         } else {
             throw new Error(`Client not supported`);
@@ -237,8 +280,8 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
         }
         this.connection.sendEnvelope('startProfiler', {
             profiler: {
-                target_module_uuid: argTargetModuleUuid
-            }
+                target_module_uuid: argTargetModuleUuid,
+            },
         });
     }
 
@@ -253,8 +296,8 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
         this.connection.sendEnvelope('stopProfiler', {
             profiler: {
                 captures_path: capturesPath,
-                target_module_uuid: argTargetModuleUuid
-            }
+                target_module_uuid: argTargetModuleUuid,
+            },
         });
     }
 }

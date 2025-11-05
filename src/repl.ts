@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 
-import EventEmitter from 'events';
-import net from 'net';
-import readline from 'readline';
-import repl from 'repl';
-import util from 'util';
+import EventEmitter from 'node:events';
+import { type AddressInfo, createServer, type Server, type Socket } from 'node:net';
+import { clearLine, cursorTo } from 'node:readline';
+import { type REPLServer, start as startRepl } from 'node:repl';
+import { format, inspect } from 'node:util';
+import type { Context } from 'node:vm';
 import {
     MinecraftDebugSession,
     QuickJSDebugConnection,
-    QuickJSHandle,
-    QuickJSScope,
-    QuickJSStackFrame
+    type QuickJSHandle,
+    type QuickJSScope,
+    type QuickJSStackFrame,
 } from './index.js';
-import { Context } from 'vm';
-import { ProtocolInfo, StatTree } from './lib/minecraft.js';
+import type { ProtocolInfo, StatTree } from './lib/minecraft.js';
 
 function dumpStatTree(tree: StatTree) {
     const ret: string[] = [];
@@ -33,11 +33,11 @@ function dumpStatTree(tree: StatTree) {
 }
 
 class MCQuickJSDebugServer extends EventEmitter {
-    server: net.Server;
+    server: Server;
     connection: QuickJSDebugConnection | null = null;
     breakpointMap = new Map<string, { line: number; column?: number }[]>();
     logLevel = 0;
-    socket: net.Socket | null = null;
+    socket: Socket | null = null;
     session: MinecraftDebugSession | null = null;
     paused = false;
     stacks: QuickJSStackFrame[] = [];
@@ -46,7 +46,7 @@ class MCQuickJSDebugServer extends EventEmitter {
     protocolInfo: ProtocolInfo = { version: 1 };
     constructor(port: number) {
         super();
-        this.server = net.createServer((socket) => {
+        this.server = createServer((socket) => {
             this.onConnection(socket);
         });
         this.server.listen(port);
@@ -65,12 +65,12 @@ class MCQuickJSDebugServer extends EventEmitter {
         this.currentStack = null;
     }
 
-    onConnection(socket: net.Socket) {
+    onConnection(socket: Socket) {
         if (this.connection != null) {
             socket.end();
             return;
         }
-        const addressInfo = socket.address() as net.AddressInfo;
+        const addressInfo = socket.address() as AddressInfo;
         const address = `${addressInfo.address}:${addressInfo.port}`;
         this.socket = socket;
         this.connection = new QuickJSDebugConnection(socket);
@@ -103,7 +103,7 @@ class MCQuickJSDebugServer extends EventEmitter {
     }
 
     get port() {
-        return (this.server.address() as net.AddressInfo).port;
+        return (this.server.address() as AddressInfo).port;
     }
 
     wrapAsync<P extends unknown[]>(asyncFunc: (...args: P) => Promise<void>) {
@@ -149,7 +149,7 @@ class MCQuickJSDebugServer extends EventEmitter {
                 return await this.session.inspectVariable(ref, {
                     filter: 'indexed',
                     start: range[0],
-                    count: range[1] - range[0] + 1
+                    count: range[1] - range[0] + 1,
                 });
             }
             return await this.session.inspectVariable(ref);
@@ -276,19 +276,19 @@ const referenceLocatorRegex = /^(\d+)(?:\s+(\d+)\.\.(\d+))?$/;
 const importRegex = /^(\S+?)(?:\s+as\s+(\w+))?$/;
 const inspectMethods = [
     ['js', '[Default] Inspect recursively but cost more time'],
-    ['handle', 'Only show references of properties']
+    ['handle', 'Only show references of properties'],
 ];
 class DebuggerReplServer {
-    repl: repl.REPLServer;
+    repl: REPLServer;
     server: MCQuickJSDebugServer;
     acceptUserInput: boolean;
     recentCommand: string;
     inspectMethod: string;
     constructor(port: number) {
-        this.repl = repl.start({
+        this.repl = startRepl({
             eval: (cmd, context, file, callback) => {
                 this.doEval(cmd, context, file, callback);
-            }
+            },
         });
         this.server = new MCQuickJSDebugServer(port);
         this.acceptUserInput = true;
@@ -327,7 +327,7 @@ class DebuggerReplServer {
             })
             .on('error', (err) => {
                 if (this.repl.editorMode) return;
-                this.printLine(util.format('[Debugger] %s', err), true);
+                this.printLine(format('[Debugger] %s', err), true);
             });
         this.updatePrompt();
         this.showOfflinePrompt();
@@ -335,8 +335,8 @@ class DebuggerReplServer {
 
     printLine(str: string, rewriteLine?: boolean) {
         if (rewriteLine) {
-            readline.cursorTo(this.repl.output, 0);
-            readline.clearLine(this.repl.output, 0);
+            cursorTo(this.repl.output, 0);
+            clearLine(this.repl.output, 0);
         }
         this.repl.output.write(`${str}\n`);
         if (this.acceptUserInput) {
@@ -418,16 +418,20 @@ class DebuggerReplServer {
         if (this.inspectMethod === 'handle') {
             return inspectHandle(handle);
         }
-        return util.inspect(await handle.inspect(), { colors: true });
+        return inspect(await handle.inspect(), { colors: true });
     }
 
     defineDefaultCommands() {
+        const executeServerQuickCommand = async (command: string) => {
+            this.recentCommand = command;
+            await this.server.executeCommand(command);
+        };
         this.repl.defineCommand('disconnect', {
             help: 'Disconnect from Debuggee',
             action: () => {
                 this.server.reset();
                 this.repl.displayPrompt(true);
-            }
+            },
         });
         this.repl.defineCommand('stack', {
             help: 'Print stacks or switch current stack frame',
@@ -437,13 +441,13 @@ class DebuggerReplServer {
                     await this.server.updateState();
                 }
                 this.printStack();
-            })
+            }),
         });
         this.repl.defineCommand('breakpoints', {
             help: 'Show breakpoints',
             action: () => {
                 this.printBreakpoints();
-            }
+            },
         });
         this.repl.defineCommand('on', {
             help: 'Add breakpoint',
@@ -455,7 +459,7 @@ class DebuggerReplServer {
                 } else {
                     this.printLine(`Invalid breakpoint: ${args}`);
                 }
-            }
+            },
         });
         this.repl.defineCommand('off', {
             help: 'Remove breakpoint',
@@ -467,7 +471,7 @@ class DebuggerReplServer {
                 } else {
                     this.printLine(`Invalid breakpoint: ${args}`);
                 }
-            }
+            },
         });
         this.repl.defineCommand('scope', {
             help: 'Dump scope',
@@ -482,7 +486,7 @@ class DebuggerReplServer {
                     this.printLine(`Invalid scope: ${args}`);
                 }
                 this.printLine(scopes.map((scope, i) => `${i} ${inspectHandle(scope)}`).join('\n'));
-            })
+            }),
         });
         this.repl.defineCommand('ref', {
             help: 'Dump reference',
@@ -500,7 +504,7 @@ class DebuggerReplServer {
                 } else {
                     this.printLine(`Invalid reference: ${args}`);
                 }
-            })
+            }),
         });
         this.repl.defineCommand('setinspect', {
             help: 'Set inspect method',
@@ -516,7 +520,7 @@ class DebuggerReplServer {
                     lines.unshift(`Invalid inspect method: ${args}`);
                 }
                 this.printLine(lines.join('\n'));
-            }
+            },
         });
         this.repl.defineCommand('loglevel', {
             help: 'Show or change log level',
@@ -530,11 +534,11 @@ class DebuggerReplServer {
                     this.printLine(
                         [
                             `Log level is ${LOG_LEVEL[this.server.logLevel]}`,
-                            `Accept values: ${LOG_LEVEL.join(', ')}`
-                        ].join('\n')
+                            `Accept values: ${LOG_LEVEL.join(', ')}`,
+                        ].join('\n'),
                     );
                 }
-            }
+            },
         });
         this.repl.defineCommand('require', {
             help: 'Require module to global scope',
@@ -550,7 +554,7 @@ class DebuggerReplServer {
                 } else {
                     this.printLine(`Invalid import statement: ${args}`);
                 }
-            })
+            }),
         });
         this.repl.defineCommand('import', {
             help: 'Import module to global scope',
@@ -566,28 +570,28 @@ class DebuggerReplServer {
                 } else {
                     this.printLine(`Invalid import statement: ${args}`);
                 }
-            })
+            }),
         });
         this.repl.defineCommand('resume', {
             help: 'Resume control',
             action: this.server.wrapAsync(async () => {
                 await this.server.executeCommand('Resume');
                 this.repl.displayPrompt(true);
-            })
+            }),
         });
         this.repl.defineCommand('pause', {
             help: 'Pause execution',
             action: this.server.wrapAsync(async () => {
-                await this.server.executeCommand((this.recentCommand = 'Pause'));
+                await executeServerQuickCommand('Pause');
                 this.repl.displayPrompt(true);
-            })
+            }),
         });
         this.repl.defineCommand('continue', {
             help: 'Continue current line',
             action: this.server.wrapAsync(async () => {
-                await this.server.executeCommand((this.recentCommand = 'Continue'));
+                await executeServerQuickCommand('Continue');
                 this.repl.displayPrompt(true);
-            })
+            }),
         });
         this.repl.defineCommand('until', {
             help: 'Continue execution until specified breakpoint hit',
@@ -600,25 +604,25 @@ class DebuggerReplServer {
                         this.server.off('breakpointHit', breakpointHitListener);
                     };
                     this.server.on('breakpointHit', breakpointHitListener);
-                    await this.server.executeCommand((this.recentCommand = 'Continue'));
+                    await executeServerQuickCommand('Continue');
                     this.repl.displayPrompt(true);
                 } else {
                     this.printLine(`Invalid breakpoint: ${args}`);
                 }
-            })
+            }),
         });
         this.repl.defineCommand('step', {
             help: 'Step current line',
             action: this.server.wrapAsync(async (type) => {
                 if (type === 'in') {
-                    await this.server.executeCommand((this.recentCommand = 'StepIn'));
+                    await executeServerQuickCommand('StepIn');
                 } else if (type === 'out') {
-                    await this.server.executeCommand((this.recentCommand = 'StepOut'));
+                    await executeServerQuickCommand('StepOut');
                 } else {
-                    await this.server.executeCommand((this.recentCommand = 'Step'));
+                    await executeServerQuickCommand('Step');
                 }
                 this.repl.displayPrompt(true);
-            })
+            }),
         });
         this.repl.defineCommand('stat', {
             help: '[Minecraft only] Show running statistics',
@@ -629,7 +633,7 @@ class DebuggerReplServer {
                 } else {
                     this.printLine('Statistics is not available');
                 }
-            }
+            },
         });
         this.repl.defineCommand('creator', {
             help: '[Minecraft only] Edit creator settings',
@@ -649,11 +653,11 @@ class DebuggerReplServer {
                 } else {
                     this.printLine('Invalid syntax');
                 }
-            }
+            },
         });
     }
 
-    doEval(cmd: string, context: Context, file: string, callback: (err: Error | null, result?: unknown) => void) {
+    doEval(cmd: string, _context: Context, _file: string, callback: (err: Error | null, result?: unknown) => void) {
         this.acceptUserInput = false;
         try {
             if (this.server.session) {
@@ -675,14 +679,12 @@ class DebuggerReplServer {
                     result = this.server.executeCommand('Pause');
                 }
                 result
-                    .then(
-                        () => {
-                            callback(null);
-                        },
-                        (err) => {
-                            callback(err as Error);
-                        }
-                    )
+                    .then(() => {
+                        callback(null);
+                    })
+                    .catch((err) => {
+                        callback(err as Error);
+                    })
                     .finally(() => {
                         this.acceptUserInput = true;
                     });

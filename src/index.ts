@@ -1,10 +1,10 @@
 export { DebugConnection, QuickJSDebugConnection } from './lib/connection.js';
+export { MinecraftDebugSession } from './lib/minecraft.js';
 export {
-    QuickJSDebugSession,
-    QuickJSStackFrame,
     InspectOptions,
+    QuickJSDebugSession,
     QuickJSHandle,
     QuickJSScope,
-    QuickJSVariable
+    QuickJSStackFrame,
+    QuickJSVariable,
 } from './lib/session.js';
-export { MinecraftDebugSession } from './lib/minecraft.js';

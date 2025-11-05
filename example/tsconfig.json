@@ -1,0 +1,17 @@
+{
+    "extends": "../tsconfig-base.json",
+    "compilerOptions": {
+        "composite": true,
+        "noEmit": true,
+        "rootDir": ".",
+        "outDir": "../dist/example",
+        "declarationDir": "../dist/example"
+    },
+    "include": ["**/*"],
+    "exclude": ["example_behavior_pack"],
+    "references": [
+        {
+            "path": "../src"
+        }
+    ]
+}

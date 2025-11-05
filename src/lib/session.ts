@@ -1,11 +1,11 @@
-import EventEmitter from 'events';
-import { DebugProtocol } from '@vscode/debugprotocol';
-import { DebugConnection } from './connection.js';
+import EventEmitter from 'node:events';
+import type { DebugProtocol } from '@vscode/debugprotocol';
+import type { DebugConnection } from './connection.js';
 
 function generateFunctionCode<T = unknown>(
     f: ((args: T) => unknown) | string,
     args: T | undefined,
-    type: 'eval' | 'function'
+    type: 'eval' | 'function',
 ) {
     if (typeof f === 'function') {
         const serializedArgs = JSON.stringify(args);
@@ -106,7 +106,7 @@ export class QuickJSHandle<T = unknown> {
         const { maxDepth, inspectProto } = options ?? {};
         return this.inspectInternal(maxDepth ?? 16, {
             referenceMap,
-            inspectProto
+            inspectProto,
         }) as Promise<T>;
     }
 
@@ -128,7 +128,7 @@ export class QuickJSHandle<T = unknown> {
                     getPropOptions = {
                         filter: 'indexed',
                         start: 0,
-                        count: this.indexedCount
+                        count: this.indexedCount,
                     };
                 } else {
                     result = {};
@@ -136,7 +136,7 @@ export class QuickJSHandle<T = unknown> {
                 referenceMap.set(this.ref, result);
                 try {
                     properties = await this.getProperties(getPropOptions);
-                } catch (err) {
+                } catch (_) {
                     properties = [];
                 }
                 await Promise.all(
@@ -151,10 +151,10 @@ export class QuickJSHandle<T = unknown> {
                         } else {
                             (result as Record<string, unknown>)[property.name] = await property.inspectInternal(
                                 depth - 1,
-                                options
+                                options,
                             );
                         }
-                    })
+                    }),
                 );
                 (result as WithQuickJSRef)[QuickJSRef] = this.ref;
                 return result;
@@ -236,12 +236,13 @@ export class QuickJSVariable<T = unknown> extends QuickJSHandle<T> {
             case 'object':
             case 'function':
                 this.primitive = false;
+                this.valueAsString = variableInfo.value;
                 this.isArray = variableInfo.indexedVariables !== undefined;
                 this.indexedCount = variableInfo.indexedVariables;
-            // falls through
+                break;
             default:
-                this.valueAsString = variableInfo.value;
                 this.primitive = false;
+                this.valueAsString = variableInfo.value;
                 break;
         }
     }
@@ -250,6 +251,10 @@ export class QuickJSVariable<T = unknown> extends QuickJSHandle<T> {
 export interface BreakpointInfo {
     line: number;
     column?: number;
+}
+
+export interface BreakpointStatus {
+    verified: boolean;
 }
 
 export interface StoppedEvent {
@@ -264,6 +269,7 @@ export interface ContextEvent {
 
 export type EvaluateContext = 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables';
 
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: Event emitter
 export class QuickJSDebugSession extends EventEmitter {
     connection: DebugConnection;
     constructor(connection: DebugConnection) {
@@ -304,7 +310,7 @@ export class QuickJSDebugSession extends EventEmitter {
         const res = await this.connection.sendRequest<DebugProtocol.EvaluateResponse['body']>('evaluate', {
             frameId,
             context: context ?? 'watch',
-            expression
+            expression,
         } as DebugProtocol.EvaluateArguments);
         return new QuickJSVariable<R>(this, { ...res, name: 'result', value: res.result });
     }
@@ -320,18 +326,18 @@ export class QuickJSDebugSession extends EventEmitter {
 
     async getScopes(frameId: number) {
         const res = await this.connection.sendRequest<ScopeInfo[]>('scopes', {
-            frameId
+            frameId,
         } as DebugProtocol.ScopesArguments);
         return res.map((e) => new QuickJSScope(this, e));
     }
 
     async inspectVariable<T = unknown>(
         reference: number,
-        options?: Omit<DebugProtocol.VariablesArguments, 'variablesReference'>
+        options?: Omit<DebugProtocol.VariablesArguments, 'variablesReference'>,
     ) {
         const res = await this.connection.sendRequest<VariableInfo[]>('variables', {
             variablesReference: reference,
-            ...options
+            ...options,
         } as DebugProtocol.VariablesArguments);
         return res.map((e) => new QuickJSVariable<T>(this, e));
     }
@@ -344,14 +350,24 @@ export class QuickJSDebugSession extends EventEmitter {
         this.connection.sendEnvelope('breakpoints', {
             breakpoints: {
                 path: fileName,
-                breakpoints: breakpoints.length ? breakpoints : undefined
-            }
+                breakpoints: breakpoints.length ? breakpoints : undefined,
+            },
         });
+    }
+
+    async setBreakpointLines(fileName: string, breakpointsLines: number[]) {
+        const status = await this.connection.sendRequest<{
+            breakpoints: BreakpointStatus[];
+        }>('setBreakpoints', {
+            path: fileName,
+            breakpoints: breakpointsLines,
+        });
+        return status.breakpoints;
     }
 
     setStopOnException(enabled: boolean) {
         this.connection.sendEnvelope('stopOnException', {
-            stopOnException: enabled
+            stopOnException: enabled,
         });
     }
 }

@@ -1,12 +1,12 @@
-import { Buffer } from 'buffer';
-import EventEmitter from 'events';
-import { Socket } from 'net';
+import { Buffer } from 'node:buffer';
+import EventEmitter from 'node:events';
+import type { Socket } from 'node:net';
 
-function addMessageListener(socket: Socket, onMessage: (buffer: Buffer) => void) {
-    const chunks: Buffer[] = [];
+function addMessageListener(socket: Socket, onMessage: (buffer: Buffer<ArrayBuffer>) => void) {
+    const chunks: Buffer<ArrayBuffer>[] = [];
     let bufferLength = 0;
-    let state: 'content' | 'length' | null = null;
-    let triggerLength = 0;
+    let state: 'content' | 'length' = 'length';
+    let triggerLength = 9;
     socket.on('data', (chunk) => {
         bufferLength += chunk.length;
         chunks.push(chunk);
@@ -22,25 +22,12 @@ function addMessageListener(socket: Socket, onMessage: (buffer: Buffer) => void)
                     break;
                 case 'content':
                     onMessage(triggerChunk);
-                // falls through
-                default:
                     state = 'length';
                     triggerLength = 9;
+                    break;
             }
         }
     });
-}
-
-// eslint-disable-next-line @typescript-eslint/no-empty-function
-const emptyFunction = () => {};
-function deferred<T>() {
-    let resolve: (value: T | PromiseLike<T>) => void = emptyFunction;
-    let reject: (reason?: unknown) => void = emptyFunction;
-    const promise = new Promise<T>((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return { resolve, reject, promise };
 }
 
 export interface DebugConnection extends EventEmitter {
@@ -116,7 +103,7 @@ export class QuickJSDebugConnection extends EventEmitter implements DebugConnect
         this.sendMessage({
             version: this.requestVersion,
             type,
-            ...data
+            ...data,
         } as DebugEnvelope);
     }
 
@@ -127,8 +114,8 @@ export class QuickJSDebugConnection extends EventEmitter implements DebugConnect
             request: {
                 request_seq: requestSeq,
                 command,
-                args
-            } as DebuggerRequest
+                args,
+            } as DebuggerRequest,
         });
         return requestSeq;
     }
@@ -136,13 +123,14 @@ export class QuickJSDebugConnection extends EventEmitter implements DebugConnect
     sendRequest<R = void, T extends object = object>(command: string, args?: T) {
         const requestSeq = this.sendRequestRaw(command, args);
         const timeoutError = new Error(`Request timeout ${this.requestTimeout}ms exceed.`);
-        const { promise, resolve, reject } = deferred<R>();
+        const { promise, resolve, reject } = Promise.withResolvers<R>();
         this.requestReactions.set(requestSeq, { resolve: resolve as (value: unknown) => void, reject });
         const timeout = setTimeout(() => {
             reject(timeoutError);
         }, this.requestTimeout);
         return promise.finally(() => {
             clearTimeout(timeout);
+            this.requestReactions.delete(requestSeq);
         });
     }
 

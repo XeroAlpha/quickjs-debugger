@@ -1,8 +1,8 @@
-import { strict as assert } from 'assert';
-import net from 'net';
+import { strict as assert } from 'node:assert';
+import { type AddressInfo, createServer, type Socket } from 'node:net';
 import { QuickJSDebugConnection, QuickJSDebugSession } from '../src/index.js';
 
-async function test(socket: net.Socket) {
+async function test(socket: Socket) {
     const conn = new QuickJSDebugConnection(socket);
     const session = new QuickJSDebugSession(conn);
     const topStack = await session.getTopStack();
@@ -13,7 +13,7 @@ async function test(socket: net.Socket) {
         boolean: false,
         null: null,
         undefined,
-        object: { array: [1, 2, 3] }
+        object: { array: [1, 2, 3] },
     };
     const resultRef = await topStack.evaluateExpression(`({
         number: 1,
@@ -31,27 +31,27 @@ async function test(socket: net.Socket) {
         await topStack.evaluate(() => {
             const error = new Error();
             return error.stack ?? '';
-        })
+        }),
     );
     process.stdout.write('Global scope\n');
     process.stdout.write(
         await topStack.evaluateGlobal(() => {
             const error = new Error();
             return error.stack ?? '';
-        })
+        }),
     );
     session.resume();
     conn.close();
 }
 
 function main([port]: string[]) {
-    const server = net.createServer((socket) => {
+    const server = createServer((socket) => {
         test(socket).catch((err) => {
             console.error(err);
         });
     });
     server.listen(port);
-    const addr = server.address() as net.AddressInfo;
+    const addr = server.address() as AddressInfo;
     process.stdout.write(`Please connect to <host>:${addr.port}\n`);
 }
 

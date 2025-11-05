@@ -1,0 +1,21 @@
+{
+    "compilerOptions": {
+        "moduleResolution": "NodeNext",
+        "module": "NodeNext",
+        "target": "ESNext",
+        "lib": ["ESNext"],
+        "skipLibCheck": true,
+        "allowJs": true,
+        "declaration": true,
+        "sourceMap": true,
+        "strict": true,
+        "noImplicitAny": true,
+        "strictNullChecks": true,
+        "strictFunctionTypes": true,
+        "strictBindCallApply": true,
+        "strictPropertyInitialization": true,
+        "esModuleInterop": true,
+        "outDir": "./dist",
+        "declarationDir": "./dist"
+    }
+}

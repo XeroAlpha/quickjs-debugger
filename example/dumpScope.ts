@@ -1,13 +1,13 @@
-import { strict as assert } from 'assert';
-import net from 'net';
-import util from 'util';
+import { strict as assert } from 'node:assert';
+import { type AddressInfo, createServer, type Socket } from 'node:net';
+import { inspect } from 'node:util';
 import { QuickJSDebugConnection, QuickJSDebugSession } from '../src/index.js';
 
-type QuickJSGlobal = typeof globalThis & {
-    Global: typeof globalThis;
+type QuickJSGlobal = { Global: QuickJSGlobal } & {
+    -readonly [K in keyof typeof globalThis]: (typeof globalThis)[K];
 };
 
-async function test(socket: net.Socket) {
+async function test(socket: Socket) {
     const conn = new QuickJSDebugConnection(socket);
     const session = new QuickJSDebugSession(conn);
     const topStack = await session.getTopStack();
@@ -15,23 +15,23 @@ async function test(socket: net.Socket) {
     const scopes = await topStack.getScopes();
     await Promise.all(
         scopes.map(async (scope) => {
-            target[scope.name] = await scope.inspect({ inspectProto: true });
-        })
+            (target as Record<string, unknown>)[scope.name] = await scope.inspect({ inspectProto: true });
+        }),
     );
-    process.stdout.write(`${util.inspect(target)}\n`);
+    process.stdout.write(`${inspect(target)}\n`);
     assert.equal(target.Global.JSON, target.Global.globalThis.JSON);
     session.resume();
     conn.close();
 }
 
 function main([port]: string[]) {
-    const server = net.createServer((socket) => {
+    const server = createServer((socket) => {
         test(socket).catch((err) => {
             console.error(err);
         });
     });
     server.listen(port);
-    const addr = server.address() as net.AddressInfo;
+    const addr = server.address() as AddressInfo;
     process.stdout.write(`Please connect to <host>:${addr.port}\n`);
 }
 
