@@ -13,7 +13,7 @@ import {
     QuickJSStackFrame
 } from './index.js';
 import { Context } from 'vm';
-import { StatTree } from './lib/minecraft.js';
+import { ProtocolInfo, StatTree } from './lib/minecraft.js';
 
 function dumpStatTree(tree: StatTree) {
     const ret: string[] = [];
@@ -43,6 +43,7 @@ class MCQuickJSDebugServer extends EventEmitter {
     stacks: QuickJSStackFrame[] = [];
     stackIndex = 0;
     currentStack: QuickJSStackFrame | null = null;
+    protocolInfo: ProtocolInfo = { version: 1 };
     constructor(port: number) {
         super();
         this.server = net.createServer((socket) => {
@@ -73,7 +74,7 @@ class MCQuickJSDebugServer extends EventEmitter {
         const address = `${addressInfo.address}:${addressInfo.port}`;
         this.socket = socket;
         this.connection = new QuickJSDebugConnection(socket);
-        this.session = new MinecraftDebugSession(this.connection);
+        this.session = new MinecraftDebugSession(this.connection, this.protocolInfo);
         this.paused = false;
         this.emit('online', address);
         this.syncBreakpoints();
@@ -594,9 +595,11 @@ class DebuggerReplServer {
                 const parsed = this.parseBreakpoint(args);
                 if (parsed) {
                     this.server.addBreakpoint(parsed.lineNumber, parsed.fileName);
-                    this.server.on('breakpointHit', () => {
+                    const breakpointHitListener = () => {
                         this.server.removeBreakpoint(parsed.lineNumber, parsed.fileName);
-                    });
+                        this.server.off('breakpointHit', breakpointHitListener);
+                    };
+                    this.server.on('breakpointHit', breakpointHitListener);
                     await this.server.executeCommand((this.recentCommand = 'Continue'));
                     this.repl.displayPrompt(true);
                 } else {
@@ -625,6 +628,26 @@ class DebuggerReplServer {
                     this.printLine(stat);
                 } else {
                     this.printLine('Statistics is not available');
+                }
+            }
+        });
+        this.repl.defineCommand('creator', {
+            help: '[Minecraft only] Edit creator settings',
+            action: (args) => {
+                const protocolInfo = this.server.protocolInfo as unknown as Record<string, unknown>;
+                const argParts = args.split(/\s+/);
+                if (argParts.length === 0) {
+                    this.printLine(`Current creator config: ${JSON.stringify(protocolInfo, null, 4)}`);
+                } else if (argParts.length === 1) {
+                    const [name] = argParts;
+                    this.printLine(`${name}: ${JSON.stringify(protocolInfo[name], null, 4)}`);
+                } else if (argParts.length === 2) {
+                    const [name, value] = argParts;
+                    const newValue: unknown = JSON.parse(value);
+                    protocolInfo[name] = newValue;
+                    this.printLine(`${name}: ${JSON.stringify(newValue, null, 4)}`);
+                } else {
+                    this.printLine('Invalid syntax');
                 }
             }
         });

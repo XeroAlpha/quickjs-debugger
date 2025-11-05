@@ -1,6 +1,6 @@
 {
   "name": "quickjs-debugger",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "A debug library for quickjs",
   "type": "module",
   "main": "./dist/index.js",

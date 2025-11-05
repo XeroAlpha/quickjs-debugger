@@ -262,6 +262,8 @@ export interface ContextEvent {
     reason: 'new' | 'exited';
 }
 
+export type EvaluateContext = 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables';
+
 export class QuickJSDebugSession extends EventEmitter {
     connection: DebugConnection;
     constructor(connection: DebugConnection) {
@@ -298,9 +300,10 @@ export class QuickJSDebugSession extends EventEmitter {
         return this.connection.sendRequest('stepOut');
     }
 
-    async evaluate<R = unknown>(frameId: number, expression: string) {
+    async evaluate<R = unknown>(frameId: number, expression: string, context?: EvaluateContext) {
         const res = await this.connection.sendRequest<DebugProtocol.EvaluateResponse['body']>('evaluate', {
             frameId,
+            context: context ?? 'watch',
             expression
         } as DebugProtocol.EvaluateArguments);
         return new QuickJSVariable<R>(this, { ...res, name: 'result', value: res.result });
@@ -334,28 +337,21 @@ export class QuickJSDebugSession extends EventEmitter {
     }
 
     resume() {
-        this.connection.sendMessage({
-            type: 'resume',
-            version: 1
-        });
+        this.connection.sendEnvelope('resume');
     }
 
     setBreakpoints(fileName: string, breakpoints: BreakpointInfo[]) {
-        this.connection.sendMessage({
-            type: 'breakpoints',
+        this.connection.sendEnvelope('breakpoints', {
             breakpoints: {
                 path: fileName,
                 breakpoints: breakpoints.length ? breakpoints : undefined
-            },
-            version: 1
+            }
         });
     }
 
     setStopOnException(enabled: boolean) {
-        this.connection.sendMessage({
-            type: 'stopOnException',
-            stopOnException: enabled,
-            version: 1
+        this.connection.sendEnvelope('stopOnException', {
+            stopOnException: enabled
         });
     }
 }

@@ -1,9 +1,38 @@
 import { DebugConnection, DebuggeeEvent } from './connection.js';
 import { ContextEvent, QuickJSDebugSession, StoppedEvent } from './session.js';
 
+export enum ProtocolVersion {
+    Unknown = 0,
+    /**
+     * Initial version
+     */
+    Initial = 1,
+    /**
+     * Add targetModuleUuid to protocol event
+     * @since Minecraft 1.21.10
+     */
+    SupportTargetModuleUuid = 2,
+    /**
+     * Add array of plugins and target module ids to incoming protocol event
+     * @since Minecraft 1.21.40
+     */
+    SupportTargetSelection = 3,
+    /**
+     * MC can require a passcode to connect
+     * @since Minecraft 1.21.50
+     */
+    SupportPasscode = 4,
+    /**
+     * Debugger can take mc script profiler captures
+     * @since Minecraft 1.21.50.25
+     */
+    SupportProfilerCaptures = 5
+}
+
 export interface ProtocolInfo {
     version: number;
     targetModuleUuid?: string;
+    passcode?: string;
 }
 
 export enum LogLevel {
@@ -23,6 +52,23 @@ export interface LogEvent extends DebuggeeEvent {
 export interface ProtocolEvent extends DebuggeeEvent {
     type: 'ProtocolEvent';
     version: number;
+}
+
+export interface ProtocolEventV3 extends ProtocolEvent {
+    plugins: {
+        name: string;
+        module_uuid: string;
+    }[];
+}
+
+export interface ProtocolEventV4 extends ProtocolEventV3 {
+    require_passcode?: boolean;
+}
+
+export interface ProfilerCaptureEvent {
+    type: string;
+    capture_base_path: string;
+    capture_data: string;
 }
 
 export interface StatDataV1 {
@@ -118,22 +164,27 @@ function mergeStatTreeNodeV2(target: StatTree, updated: StatDataModel[], tick: n
 }
 
 export class MinecraftDebugSession extends QuickJSDebugSession {
+    protocolVersion = ProtocolVersion.Unknown;
     protocolInfo?: ProtocolInfo;
     currentStat: StatTree | null = null;
     currentTick = 0;
-    constructor(connection: DebugConnection) {
+    constructor(connection: DebugConnection, protocolInfo?: ProtocolInfo) {
         super(connection);
+        if (protocolInfo) {
+            this.setProtocolInfo(protocolInfo);
+        }
         connection.on('PrintEvent', (ev: LogEvent) => {
             this.emit('log', ev);
         });
         connection.on('ProtocolEvent', (ev: ProtocolEvent) => {
+            this.protocolVersion = ev.version;
             this.emit('protocol', ev);
             if (this.protocolInfo) {
                 const protocolInfo = this.protocolInfo;
-                this.connection.sendMessage({
-                    type: 'protocol',
+                this.connection.sendEnvelope('protocol', {
                     version: protocolInfo.version,
-                    target_module_uuid: protocolInfo.targetModuleUuid
+                    target_module_uuid: protocolInfo.targetModuleUuid,
+                    passcode: protocolInfo.passcode
                 });
             }
         });
@@ -149,10 +200,62 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
             mergeStatTreeNodeV2(stat, ev.stats, ev.tick);
             this.emit('stat', { stat, tick: ev.tick });
         });
+        connection.on('ProfilerCapture', (ev: ProfilerCaptureEvent) => {
+            this.emit('profilerCapture', ev);
+        });
     }
 
     setProtocolInfo(protocolInfo: ProtocolInfo) {
         this.protocolInfo = protocolInfo;
+    }
+
+    sendMinecraftCommand(command: string, dimensionType?: string) {
+        if (this.protocolVersion >= ProtocolVersion.SupportProfilerCaptures) {
+            this.connection.sendEnvelope('minecraftCommand', {
+                command: {
+                    command,
+                    dimension_type: dimensionType ?? 'overworld'
+                }
+            });
+        } else if (this.protocolVersion >= ProtocolVersion.SupportPasscode) {
+            this.connection.sendEnvelope('minecraftCommand', {
+                command,
+                dimension_type: dimensionType ?? 'overworld'
+            });
+        } else {
+            throw new Error(`Client not supported`);
+        }
+    }
+
+    sendStartProfiler(targetModuleUuid?: string) {
+        if (this.protocolVersion < ProtocolVersion.SupportProfilerCaptures) {
+            throw new Error(`Client not supported`);
+        }
+        const argTargetModuleUuid = targetModuleUuid ?? this.protocolInfo?.targetModuleUuid;
+        if (!argTargetModuleUuid) {
+            throw new Error(`Expect target module uuid`);
+        }
+        this.connection.sendEnvelope('startProfiler', {
+            profiler: {
+                target_module_uuid: argTargetModuleUuid
+            }
+        });
+    }
+
+    sendStopProfiler(capturesPath: string, targetModuleUuid?: string) {
+        if (this.protocolVersion < ProtocolVersion.SupportProfilerCaptures) {
+            throw new Error(`Client not supported`);
+        }
+        const argTargetModuleUuid = targetModuleUuid ?? this.protocolInfo?.targetModuleUuid;
+        if (!argTargetModuleUuid) {
+            throw new Error(`Expect target module uuid`);
+        }
+        this.connection.sendEnvelope('stopProfiler', {
+            profiler: {
+                captures_path: capturesPath,
+                target_module_uuid: argTargetModuleUuid
+            }
+        });
     }
 }
 
@@ -160,6 +263,7 @@ export interface MinecraftDebugSessionEventMap {
     log: (event: LogEvent) => void;
     protocol: (event: ProtocolEvent) => void;
     stat: (event: StatMessageV2Event) => void;
+    profilerCapture: (event: ProfilerCaptureEvent) => void;
 }
 
 export interface MinecraftDebugSession {
@@ -169,34 +273,40 @@ export interface MinecraftDebugSession {
     on(eventName: 'log', listener: (event: LogEvent) => void): this;
     on(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
     on(eventName: 'stat', listener: (event: StatEvent) => void): this;
+    on(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
     once(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     once(eventName: 'context', listener: (event: ContextEvent) => void): this;
     once(eventName: 'end', listener: () => void): this;
     once(eventName: 'log', listener: (event: LogEvent) => void): this;
     once(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
     once(eventName: 'stat', listener: (event: StatEvent) => void): this;
+    once(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
     off(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     off(eventName: 'context', listener: (event: ContextEvent) => void): this;
     off(eventName: 'end', listener: () => void): this;
     off(eventName: 'log', listener: (event: LogEvent) => void): this;
     off(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
     off(eventName: 'stat', listener: (event: StatEvent) => void): this;
+    off(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
     addListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     addListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
     addListener(eventName: 'end', listener: () => void): this;
     addListener(eventName: 'log', listener: (event: LogEvent) => void): this;
     addListener(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
     addListener(eventName: 'stat', listener: (event: StatEvent) => void): this;
+    addListener(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
     removeListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
     removeListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
     removeListener(eventName: 'end', listener: () => void): this;
     removeListener(eventName: 'log', listener: (event: LogEvent) => void): this;
     removeListener(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
     removeListener(eventName: 'stat', listener: (event: StatEvent) => void): this;
+    removeListener(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
     emit(eventName: 'stopped', event: StoppedEvent): boolean;
     emit(eventName: 'context', event: ContextEvent): boolean;
     emit(eventName: 'end'): boolean;
     emit(eventName: 'log', event: LogEvent): boolean;
     emit(eventName: 'protocol', event: ProtocolEvent): boolean;
     emit(eventName: 'stat', event: StatEvent): boolean;
+    emit(eventName: 'profilerCapture', event: ProfilerCaptureEvent): boolean;
 }

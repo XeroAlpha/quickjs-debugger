@@ -45,7 +45,7 @@ function deferred<T>() {
 
 export interface DebugConnection extends EventEmitter {
     close(): void;
-    sendMessage<T = unknown>(message: T): void;
+    sendEnvelope(type: string, data?: object): void;
     sendRequest<R = void, T extends object = object>(command: string, args?: T): Promise<R>;
 }
 
@@ -112,7 +112,7 @@ export class QuickJSDebugConnection extends EventEmitter implements DebugConnect
         this.socket.write(packet);
     }
 
-    sendEnvelope(type: string, data: object) {
+    sendEnvelope(type: string, data?: object) {
         this.sendMessage({
             version: this.requestVersion,
             type,
