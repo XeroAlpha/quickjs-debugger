@@ -1,6 +1,6 @@
 {
     "name": "quickjs-debugger",
-    "version": "2.2.0",
+    "version": "2.3.0",
     "description": "A debug library for quickjs",
     "type": "module",
     "main": "./dist/index.js",
@@ -36,11 +36,11 @@
     },
     "homepage": "https://github.com/XeroAlpha/quickjs-debugger",
     "devDependencies": {
-        "@biomejs/biome": "2.3.3",
+        "@biomejs/biome": "2.3.6",
         "@minecraft/server": "^2.5.0-beta.1.21.130-preview.25",
         "@minecraft/server-gametest": "^1.0.0-beta.1.21.130-preview.25",
-        "@types/node": "^24.10.0",
-        "rimraf": "^6.1.0",
+        "@types/node": "^24.10.1",
+        "rimraf": "^6.1.2",
         "typescript": "^5.9.3"
     },
     "dependencies": {

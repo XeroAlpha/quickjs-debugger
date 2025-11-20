@@ -160,9 +160,9 @@ class MCQuickJSDebugServer extends EventEmitter {
     syncBreakpoints() {
         if (this.session) {
             const session = this.session;
-            this.breakpointMap.forEach((breakpoints, fileName) => {
+            for (const [fileName, breakpoints] of this.breakpointMap) {
                 session.setBreakpoints(fileName, breakpoints);
-            });
+            }
         }
     }
 
@@ -381,11 +381,11 @@ class DebuggerReplServer {
 
     printBreakpoints() {
         const lines = [];
-        this.server.breakpointMap.forEach((breakpoints, fileName) => {
-            breakpoints.forEach(({ line }) => {
+        for (const [fileName, breakpoints] of this.server.breakpointMap) {
+            for (const { line } of breakpoints) {
                 lines.push(`${fileName}:${line}`);
-            });
-        });
+            }
+        }
         if (!lines.length) {
             lines.push('Empty');
         }

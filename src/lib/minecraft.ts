@@ -1,10 +1,10 @@
+import type EventEmitter from 'node:events';
 import type { DebugConnection, DebuggeeEvent } from './connection.js';
 import {
     type BreakpointInfo,
     type BreakpointStatus,
-    type ContextEvent,
     QuickJSDebugSession,
-    type StoppedEvent,
+    type QuickJSDebugSessionEvents,
 } from './session.js';
 
 export enum ProtocolVersion {
@@ -194,8 +194,25 @@ function mergeStatTreeNodeV2(target: StatTree, updated: StatDataModel[], tick: n
     return target;
 }
 
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: Event emitter
-export class MinecraftDebugSession extends QuickJSDebugSession {
+export interface MinecraftDebugSessionEvents extends QuickJSDebugSessionEvents {
+    log: [event: LogEvent];
+    protocol: [event: ProtocolEvent];
+    stat: [event: StatEvent];
+    profilerCapture: [event: ProfilerCaptureEvent];
+}
+
+type ExtendEventMap<C extends { new (...args: never[]): unknown }, EM extends Record<keyof EM, unknown[]>> = C extends {
+    new (...args: infer Args): infer Inst;
+}
+    ? Inst extends EventEmitter<infer EventMap>
+        ? { new (...args: Args): Inst & EventEmitter<EM & EventMap> }
+        : C
+    : C;
+
+export class MinecraftDebugSession extends (QuickJSDebugSession as ExtendEventMap<
+    typeof QuickJSDebugSession,
+    MinecraftDebugSessionEvents
+>) {
     protocolVersion = ProtocolVersion.Unknown;
     protocolInfo?: ProtocolInfo;
     currentStat?: StatTree;
@@ -205,12 +222,13 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
         if (protocolInfo) {
             this.setProtocolInfo(protocolInfo);
         }
-        connection.on('PrintEvent', (ev: LogEvent) => {
-            this.emit('log', ev);
+        connection.on('event:PrintEvent', (ev) => {
+            this.emit('log', ev as LogEvent);
         });
-        connection.on('ProtocolEvent', (ev: ProtocolEvent) => {
-            this.protocolVersion = ev.version;
-            this.emit('protocol', ev);
+        connection.on('event:ProtocolEvent', (ev) => {
+            const protocolEvent = ev as ProtocolEvent;
+            this.protocolVersion = protocolEvent.version;
+            this.emit('protocol', protocolEvent);
             if (this.protocolInfo) {
                 const protocolInfo = this.protocolInfo;
                 this.connection.sendEnvelope('protocol', {
@@ -221,19 +239,21 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
             }
         });
         const v1PathCache = new Map<string, string[]>();
-        connection.on('StatEvent', (ev: StatMessageV1Event) => {
+        connection.on('event:StatEvent', (ev) => {
+            const statEvent = ev as StatMessageV1Event;
             if (!this.currentStat) this.currentStat = {};
-            const stat = mergeStatTreeNodeV1(this.currentStat, ev.stats, v1PathCache);
+            const stat = mergeStatTreeNodeV1(this.currentStat, statEvent.stats, v1PathCache);
             this.emit('stat', { stat, tick: this.currentTick });
         });
-        connection.on('StatEvent2', (ev: StatMessageV2Event) => {
+        connection.on('event:StatEvent2', (ev) => {
+            const statEvent = ev as StatMessageV2Event;
             if (!this.currentStat) this.currentStat = {};
-            const stat = mergeStatTreeNodeV2(this.currentStat, ev.stats, ev.tick);
-            this.currentTick = ev.tick;
-            this.emit('stat', { stat, tick: ev.tick });
+            const stat = mergeStatTreeNodeV2(this.currentStat, statEvent.stats, statEvent.tick);
+            this.currentTick = statEvent.tick;
+            this.emit('stat', { stat, tick: statEvent.tick });
         });
-        connection.on('ProfilerCapture', (ev: ProfilerCaptureEvent) => {
-            this.emit('profilerCapture', ev);
+        connection.on('event:ProfilerCapture', (ev) => {
+            this.emit('profilerCapture', ev as ProfilerCaptureEvent);
         });
     }
 
@@ -300,56 +320,4 @@ export class MinecraftDebugSession extends QuickJSDebugSession {
             },
         });
     }
-}
-
-export interface MinecraftDebugSessionEventMap {
-    log: (event: LogEvent) => void;
-    protocol: (event: ProtocolEvent) => void;
-    stat: (event: StatMessageV2Event) => void;
-    profilerCapture: (event: ProfilerCaptureEvent) => void;
-}
-
-export interface MinecraftDebugSession {
-    on(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    on(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    on(eventName: 'end', listener: () => void): this;
-    on(eventName: 'log', listener: (event: LogEvent) => void): this;
-    on(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    on(eventName: 'stat', listener: (event: StatEvent) => void): this;
-    on(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
-    once(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    once(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    once(eventName: 'end', listener: () => void): this;
-    once(eventName: 'log', listener: (event: LogEvent) => void): this;
-    once(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    once(eventName: 'stat', listener: (event: StatEvent) => void): this;
-    once(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
-    off(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    off(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    off(eventName: 'end', listener: () => void): this;
-    off(eventName: 'log', listener: (event: LogEvent) => void): this;
-    off(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    off(eventName: 'stat', listener: (event: StatEvent) => void): this;
-    off(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
-    addListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    addListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    addListener(eventName: 'end', listener: () => void): this;
-    addListener(eventName: 'log', listener: (event: LogEvent) => void): this;
-    addListener(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    addListener(eventName: 'stat', listener: (event: StatEvent) => void): this;
-    addListener(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
-    removeListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    removeListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    removeListener(eventName: 'end', listener: () => void): this;
-    removeListener(eventName: 'log', listener: (event: LogEvent) => void): this;
-    removeListener(eventName: 'protocol', listener: (event: ProtocolEvent) => void): this;
-    removeListener(eventName: 'stat', listener: (event: StatEvent) => void): this;
-    removeListener(eventName: 'profilerCapture', listener: (event: ProfilerCaptureEvent) => void): this;
-    emit(eventName: 'stopped', event: StoppedEvent): boolean;
-    emit(eventName: 'context', event: ContextEvent): boolean;
-    emit(eventName: 'end'): boolean;
-    emit(eventName: 'log', event: LogEvent): boolean;
-    emit(eventName: 'protocol', event: ProtocolEvent): boolean;
-    emit(eventName: 'stat', event: StatEvent): boolean;
-    emit(eventName: 'profilerCapture', event: ProfilerCaptureEvent): boolean;
 }

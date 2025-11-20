@@ -30,7 +30,13 @@ function addMessageListener(socket: Socket, onMessage: (buffer: Buffer<ArrayBuff
     });
 }
 
-export interface DebugConnection extends EventEmitter {
+export interface DebugConnectionEvents {
+    end: [];
+    error: [error: unknown];
+    [key: `event:${string}`]: [DebuggeeEvent];
+}
+
+export interface DebugConnection extends EventEmitter<DebugConnectionEvents> {
     close(): void;
     sendEnvelope(type: string, data?: object): void;
     sendRequest<R = void, T extends object = object>(command: string, args?: T): Promise<R>;
@@ -39,7 +45,6 @@ export interface DebugConnection extends EventEmitter {
 export interface DebugEnvelope {
     version: number;
     type: string;
-    [key: string]: unknown;
 }
 
 export interface DebuggerRequest {
@@ -48,9 +53,13 @@ export interface DebuggerRequest {
     args: unknown;
 }
 
+export interface DebuggeeEventEnvelope extends DebugEnvelope {
+    type: 'event';
+    event: DebuggeeEvent;
+}
+
 export interface DebuggeeEvent {
     type: string;
-    [key: string]: unknown;
 }
 
 export interface DebuggeeResponse extends DebugEnvelope {
@@ -60,7 +69,7 @@ export interface DebuggeeResponse extends DebugEnvelope {
     body?: unknown;
 }
 
-export class QuickJSDebugConnection extends EventEmitter implements DebugConnection {
+export class QuickJSDebugConnection extends EventEmitter<DebugConnectionEvents> implements DebugConnection {
     socket: Socket;
     requestTimeout: number;
     requestVersion: number;
@@ -80,10 +89,9 @@ export class QuickJSDebugConnection extends EventEmitter implements DebugConnect
             this.emit('end');
             const reactions = [...this.requestReactions.values()];
             this.requestReactions.clear();
-            reactions.forEach(({ reject }) => {
+            for (const { reject } of reactions) {
                 reject(new Error('Protocol is closed'));
-            });
-            this.requestReactions.clear();
+            }
         });
         socket.on('error', (err) => this.emit('error', err));
     }
@@ -137,8 +145,8 @@ export class QuickJSDebugConnection extends EventEmitter implements DebugConnect
     handleMessage(message: Buffer) {
         const json = JSON.parse(message.toString()) as DebugEnvelope;
         if (json.type === 'event') {
-            const event = json.event as DebuggeeEvent;
-            this.emit(event.type, event);
+            const event = (json as DebuggeeEventEnvelope).event;
+            this.emit(`event:${event.type}`, event);
         } else if (json.type === 'response') {
             const response = json as DebuggeeResponse;
             const reaction = this.requestReactions.get(response.request_seq);

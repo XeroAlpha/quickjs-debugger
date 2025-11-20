@@ -1,6 +1,6 @@
 import EventEmitter from 'node:events';
 import type { DebugProtocol } from '@vscode/debugprotocol';
-import type { DebugConnection } from './connection.js';
+import type { DebugConnection, DebuggeeEvent } from './connection.js';
 
 function generateFunctionCode<T = unknown>(
     f: ((args: T) => unknown) | string,
@@ -257,31 +257,38 @@ export interface BreakpointStatus {
     verified: boolean;
 }
 
-export interface StoppedEvent {
+export interface StoppedEvent extends DebuggeeEvent {
+    type: 'StoppedEvent';
     thread: number;
     reason: 'entry' | 'exception' | 'breakpoint' | 'pause' | 'step' | 'stepIn' | 'stepOut';
 }
 
 export interface ContextEvent {
+    type: 'ThreadEvent';
     thread: number;
     reason: 'new' | 'exited';
 }
 
 export type EvaluateContext = 'watch' | 'repl' | 'hover' | 'clipboard' | 'variables';
 
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: Event emitter
-export class QuickJSDebugSession extends EventEmitter {
+export interface QuickJSDebugSessionEvents {
+    stopped: [event: StoppedEvent];
+    context: [event: ContextEvent];
+    end: [];
+}
+
+export class QuickJSDebugSession extends EventEmitter<QuickJSDebugSessionEvents> {
     connection: DebugConnection;
     constructor(connection: DebugConnection) {
         super();
         this.connection = connection;
-        connection.on('StoppedEvent', (ev: StoppedEvent) => {
-            this.emit('stopped', ev);
+        connection.on('event:StoppedEvent', (ev) => {
+            this.emit('stopped', ev as StoppedEvent);
         });
-        connection.on('ThreadEvent', (ev: ContextEvent) => {
-            this.emit('context', ev);
+        connection.on('event:ThreadEvent', (ev) => {
+            this.emit('context', ev as ContextEvent);
         });
-        connection.on('terminated', () => {
+        connection.on('event:terminated', () => {
             this.emit('end');
         });
     }
@@ -370,31 +377,4 @@ export class QuickJSDebugSession extends EventEmitter {
             stopOnException: enabled,
         });
     }
-}
-
-export interface QuickJSDebugSessionEventMap {
-    stopped: (event: StoppedEvent) => void;
-    context: (event: ContextEvent) => void;
-    end: () => void;
-}
-
-export interface QuickJSDebugSession {
-    on(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    on(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    on(eventName: 'end', listener: () => void): this;
-    once(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    once(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    once(eventName: 'end', listener: () => void): this;
-    off(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    off(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    off(eventName: 'end', listener: () => void): this;
-    addListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    addListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    addListener(eventName: 'end', listener: () => void): this;
-    removeListener(eventName: 'stopped', listener: (event: StoppedEvent) => void): this;
-    removeListener(eventName: 'context', listener: (event: ContextEvent) => void): this;
-    removeListener(eventName: 'end', listener: () => void): this;
-    emit(eventName: 'stopped', event: StoppedEvent): boolean;
-    emit(eventName: 'context', event: ContextEvent): boolean;
-    emit(eventName: 'end'): boolean;
 }
