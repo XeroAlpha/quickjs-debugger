@@ -2,14 +2,15 @@ import { Buffer } from 'node:buffer';
 import EventEmitter from 'node:events';
 import type { Socket } from 'node:net';
 
-function addMessageListener(socket: Socket, onMessage: (buffer: Buffer<ArrayBuffer>) => void) {
-    const chunks: Buffer<ArrayBuffer>[] = [];
+function addMessageListener(socket: Socket, onMessage: (buffer: Buffer) => void) {
+    const chunks: Buffer[] = [];
     let bufferLength = 0;
     let state: 'content' | 'length' = 'length';
     let triggerLength = 9;
     socket.on('data', (chunk) => {
-        bufferLength += chunk.length;
-        chunks.push(chunk);
+        const chunkBuffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        bufferLength += chunkBuffer.length;
+        chunks.push(chunkBuffer);
         while (bufferLength >= triggerLength) {
             const bufferedChunk = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
             const triggerChunk = bufferedChunk.subarray(0, triggerLength);
